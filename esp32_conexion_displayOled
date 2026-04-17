@@ -1,0 +1,124 @@
+#include <Wire.h>
+#include "MAX30105.h"
+#include "spo2_algorithm.h"
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// Configuración del display
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+MAX30105 particleSensor;
+
+// Buffers
+uint32_t irBuffer[100];
+uint32_t redBuffer[100];
+
+int32_t bufferLength;
+int32_t spo2;
+int8_t validSPO2;
+int32_t heartRate;
+int8_t validHeartRate;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Inicializar OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("Error al iniciar OLED");
+    while (1);
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("Iniciando...");
+  display.display();
+
+  // Inicializar sensor
+  if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+    Serial.println("ERROR: No se encontró el MAX30102");
+    
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("Sensor ERROR");
+    display.display();
+
+    while (1);
+  }
+
+  byte ledBrightness = 0x1F;
+  byte sampleAverage = 4;
+  byte ledMode = 2;
+  int sampleRate = 100;
+  int pulseWidth = 411;
+  int adcRange = 4096;
+
+  particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
+
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("Coloca el dedo");
+  display.display();
+
+  delay(2000);
+}
+
+void loop() {
+  bufferLength = 100;
+
+  for (byte i = 0; i < bufferLength; i++) {
+    while (particleSensor.available() == false) {
+      particleSensor.check();
+    }
+
+    redBuffer[i] = particleSensor.getRed();
+    irBuffer[i] = particleSensor.getIR();
+    particleSensor.nextSample();
+  }
+
+  maxim_heart_rate_and_oxygen_saturation(
+    irBuffer, bufferLength, redBuffer,
+    &spo2, &validSPO2, &heartRate, &validHeartRate
+  );
+
+  display.clearDisplay();
+  display.setCursor(0, 0);
+
+  if (validHeartRate == 1 && validSPO2 == 1) {
+    Serial.print("FC: ");
+    Serial.print(heartRate);
+    Serial.print(" BPM | SpO2: ");
+    Serial.print(spo2);
+    Serial.println("%");
+
+    display.setTextSize(1);
+    display.println("Frecuencia:");
+    display.setTextSize(2);
+    display.print(heartRate);
+    display.println(" BPM");
+
+    display.setTextSize(1);
+    display.println("");
+    display.println("Oxigeno:");
+
+    display.setTextSize(2);
+    display.print(spo2);
+    display.println(" %");
+
+  } else {
+    Serial.println("Esperando señal...");
+
+    display.setTextSize(1);
+    display.println("Leyendo...");
+    display.println("Coloca bien");
+    display.println("el dedo");
+  }
+
+  display.display();
+  delay(1000);
+}
